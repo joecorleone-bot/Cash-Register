@@ -1,72 +1,100 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, CalendarDays, CreditCard, Download, LayoutDashboard, Menu, Plus, Receipt, Search, ShoppingBag, Sparkles, Trash2, Wallet, X } from "lucide-react";
+import { BarChart3, CalendarDays, CreditCard, Download, LayoutDashboard, Menu, Package, Plus, Receipt, Search, ShoppingBag, Sparkles, Trash2, Wallet, X } from "lucide-react";
 import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 type Payment = "Tunai" | "QR / Online Transfer" | "Kad";
-type Sale = { id: number; date: string; category: string; amount: number; payment: Payment; note: string };
+type Product = { id: number; name: string; sku: string; price: number; cost: number; stock: number; lowStock: number };
+type Sale = { id: number; date: string; productId: number; quantity: number; amount: number; payment: Payment; note: string };
 
-const PRODUCT_CATEGORY = "Squishy";
-const seed: Sale[] = [
-  { id: 1, date: "2026-09-12T09:15", category: PRODUCT_CATEGORY, amount: 185.5, payment: "QR / Online Transfer", note: "" },
-  { id: 2, date: "2026-09-12T10:42", category: PRODUCT_CATEGORY, amount: 96, payment: "Tunai", note: "" },
-  { id: 3, date: "2026-09-11T13:10", category: PRODUCT_CATEGORY, amount: 320, payment: "Kad", note: "" },
-  { id: 4, date: "2026-09-11T15:30", category: PRODUCT_CATEGORY, amount: 245.5, payment: "QR / Online Transfer", note: "" },
-  { id: 5, date: "2026-09-10T12:20", category: PRODUCT_CATEGORY, amount: 138, payment: "Tunai", note: "" },
-  { id: 6, date: "2026-09-09T16:00", category: PRODUCT_CATEGORY, amount: 450, payment: "Kad", note: "" },
-  { id: 7, date: "2026-09-08T11:25", category: PRODUCT_CATEGORY, amount: 215, payment: "Tunai", note: "" },
+const seedProducts: Product[] = [
+  { id: 1, name: "Squishy Bear", sku: "SQ-BEAR", price: 18, cost: 8, stock: 24, lowStock: 5 },
+  { id: 2, name: "Squishy Heart", sku: "SQ-HEART", price: 22, cost: 10, stock: 18, lowStock: 5 },
+  { id: 3, name: "Squishy Cat", sku: "SQ-CAT", price: 25, cost: 11, stock: 7, lowStock: 5 },
+  { id: 4, name: "Squishy Cloud", sku: "SQ-CLOUD", price: 20, cost: 9, stock: 31, lowStock: 5 },
+];
+const seedSales: Sale[] = [
+  { id: 1, date: "2026-09-12T09:15", productId: 1, quantity: 5, amount: 90, payment: "QR / Online Transfer", note: "" },
+  { id: 2, date: "2026-09-12T10:42", productId: 2, quantity: 4, amount: 88, payment: "Tunai", note: "Repeat customer" },
+  { id: 3, date: "2026-09-11T13:10", productId: 3, quantity: 8, amount: 200, payment: "Kad", note: "" },
+  { id: 4, date: "2026-09-11T15:30", productId: 1, quantity: 6, amount: 108, payment: "QR / Online Transfer", note: "" },
+  { id: 5, date: "2026-09-10T12:20", productId: 4, quantity: 7, amount: 140, payment: "Tunai", note: "Promo" },
+  { id: 6, date: "2026-09-09T16:00", productId: 2, quantity: 10, amount: 220, payment: "Kad", note: "" },
+  { id: 7, date: "2026-09-08T11:25", productId: 3, quantity: 4, amount: 100, payment: "Tunai", note: "" },
 ];
 
 const money = (n: number) => `RM ${n.toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
 const dateLabel = (s: string) => new Date(s).toLocaleString("ms-MY", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+const today = "2026-09-12";
 
 export default function Home() {
-  const [sales, setSales] = useState<Sale[]>(seed);
+  const [products, setProducts] = useState<Product[]>(seedProducts);
+  const [sales, setSales] = useState<Sale[]>(seedSales);
   const [openForm, setOpenForm] = useState(false);
+  const [openProduct, setOpenProduct] = useState(false);
   const [editing, setEditing] = useState<Sale | null>(null);
   const [query, setQuery] = useState("");
   const [date, setDate] = useState("");
-  const [form, setForm] = useState<Omit<Sale, "id">>({ date: "2026-09-12T15:00", category: PRODUCT_CATEGORY, amount: 0, payment: "Tunai", note: "" });
+  const [form, setForm] = useState({ date: `${today}T15:00`, productId: 1, quantity: 1, payment: "Tunai" as Payment, note: "" });
+  const [productForm, setProductForm] = useState({ name: "", sku: "", price: 0, cost: 0, stock: 0, lowStock: 5 });
 
-  const today = "2026-09-12";
+  const productMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
   const todaySales = useMemo(() => sales.filter(s => s.date.startsWith(today)), [sales]);
   const weekSales = useMemo(() => sales.filter(s => { const d = new Date(s.date); const diff = (new Date(today).getTime() - new Date(d.toDateString()).getTime()) / 86400000; return diff >= 0 && diff < 7; }), [sales]);
   const monthSales = useMemo(() => sales.filter(s => s.date.startsWith("2026-09")), [sales]);
   const total = (xs: Sale[]) => xs.reduce((a, s) => a + s.amount, 0);
-  const avg = total(monthSales) / Math.max(new Set(monthSales.map(s => s.date.slice(0, 10))).size, 1);
-  const totalTransactions = monthSales.length;
-
-  const filtered = sales.filter(s => (!query || `${s.category} ${s.note}`.toLowerCase().includes(query.toLowerCase())) && (!date || s.date.startsWith(date)));
-  const trend = ["08 Sep", "09 Sep", "10 Sep", "11 Sep", "12 Sep"].map(label => ({ name: label, jualan: total(sales.filter(s => dateLabel(s.date).startsWith(label)))}));
+  const totalUnits = monthSales.reduce((a, s) => a + s.quantity, 0);
+  const lowStock = products.filter(p => p.stock <= p.lowStock);
+  const filtered = sales.filter(s => {
+    const p = productMap.get(s.productId);
+    return (!query || `${p?.name} ${p?.sku} ${s.note}`.toLowerCase().includes(query.toLowerCase())) && (!date || s.date.startsWith(date));
+  });
+  const trend = ["08 Sep", "09 Sep", "10 Sep", "11 Sep", "12 Sep"].map(label => ({ name: label, jualan: total(sales.filter(s => dateLabel(s.date).startsWith(label))) }));
   const payments = (["Tunai", "QR / Online Transfer", "Kad"] as Payment[]).map(p => ({ name: p, value: total(sales.filter(s => s.payment === p)) })).filter(x => x.value > 0);
+  const topProducts = products.map(p => ({ ...p, sold: monthSales.filter(s => s.productId === p.id).reduce((a, s) => a + s.quantity, 0) })).sort((a, b) => b.sold - a.sold).slice(0, 4);
+  const estimatedProfit = monthSales.reduce((sum, s) => { const p = productMap.get(s.productId); return sum + s.amount - (p?.cost ?? 0) * s.quantity; }, 0);
 
-  function openNewSale() { setEditing(null); setForm({ date: "2026-09-12T15:00", category: PRODUCT_CATEGORY, amount: 0, payment: "Tunai", note: "" }); setOpenForm(true); }
+  function openNewSale() { setEditing(null); setForm({ date: `${today}T15:00`, productId: products[0]?.id ?? 1, quantity: 1, payment: "Tunai", note: "" }); setOpenForm(true); }
   function saveSale() {
-    if (!form.date || form.amount <= 0) return;
-    const sale = { ...form, category: PRODUCT_CATEGORY };
-    if (editing) setSales(prev => prev.map(s => s.id === editing.id ? { ...sale, id: editing.id } : s));
-    else setSales(prev => [{ ...sale, id: Date.now() }, ...prev]);
+    const product = productMap.get(form.productId);
+    if (!product || !form.date || form.quantity <= 0 || form.quantity > product.stock) return;
+    const amount = product.price * form.quantity;
+    if (editing) {
+      const old = sales.find(s => s.id === editing.id);
+      if (old) setProducts(prev => prev.map(p => p.id === product.id ? { ...p, stock: p.stock + old.quantity - form.quantity } : p));
+      setSales(prev => prev.map(s => s.id === editing.id ? { ...s, ...form, amount } : s));
+    } else {
+      setProducts(prev => prev.map(p => p.id === product.id ? { ...p, stock: p.stock - form.quantity } : p));
+      setSales(prev => [{ ...form, amount, id: Date.now() }, ...prev]);
+    }
     setOpenForm(false); setEditing(null);
   }
-  function editSale(s: Sale) { setEditing(s); setForm({ date: s.date, category: PRODUCT_CATEGORY, amount: s.amount, payment: s.payment, note: s.note }); setOpenForm(true); }
-  function removeSale(id: number) { if (confirm("Padam rekod jualan ini?")) setSales(prev => prev.filter(s => s.id !== id)); }
+  function editSale(s: Sale) { setEditing(s); setForm({ date: s.date, productId: s.productId, quantity: s.quantity, payment: s.payment, note: s.note }); setOpenForm(true); }
+  function removeSale(id: number) { const sale = sales.find(s => s.id === id); if (!sale) return; if (confirm("Padam rekod jualan ini? Stok akan dipulangkan.")) { setProducts(prev => prev.map(p => p.id === sale.productId ? { ...p, stock: p.stock + sale.quantity } : p)); setSales(prev => prev.filter(s => s.id !== id)); } }
+  function addProduct() {
+    if (!productForm.name.trim() || !productForm.sku.trim() || productForm.price <= 0) return;
+    setProducts(prev => [...prev, { ...productForm, id: Date.now() }]);
+    setProductForm({ name: "", sku: "", price: 0, cost: 0, stock: 0, lowStock: 5 }); setOpenProduct(false);
+  }
   function exportCsv() {
-    const rows = [["Tarikh & Masa", "Kategori", "Jumlah (RM)", "Kaedah Pembayaran", "Nota"], ...filtered.map(s => [s.date, PRODUCT_CATEGORY, s.amount.toFixed(2), s.payment, s.note])];
+    const rows = [["Tarikh & Masa", "Produk", "SKU", "Qty", "Jumlah (RM)", "Kaedah Pembayaran", "Nota"], ...filtered.map(s => { const p = productMap.get(s.productId); return [s.date, p?.name ?? "", p?.sku ?? "", s.quantity, s.amount.toFixed(2), s.payment, s.note]; })];
     const csv = rows.map(r => r.map(v => `"${String(v).replaceAll('"', '""')}"`).join(",")).join("\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" })); a.download = "squishy-sales.csv"; a.click();
   }
 
   return <main className="app">
-    <aside className="sidebar"><div className="brand"><div className="brandIcon"><Sparkles size={22}/></div><div><b>Squishy</b><span>Sales Studio</span></div></div><nav><a className="active"><LayoutDashboard size={18}/> Dashboard</a><a onClick={openNewSale}><Plus size={18}/> Rekod Jualan</a><a><BarChart3 size={18}/> Laporan</a></nav><div className="sideBottom"><span className="statusDot"/> Live sales tracker</div></aside>
+    <aside className="sidebar"><div className="brand"><div className="brandIcon"><Sparkles size={22}/></div><div><b>Squishy</b><span>Sales Studio</span></div></div><nav><a className="active"><LayoutDashboard size={18}/> Dashboard</a><a onClick={openNewSale}><Plus size={18}/> POS / Jualan</a><a onClick={() => setOpenProduct(true)}><Package size={18}/> Produk & Stok</a><a><BarChart3 size={18}/> Laporan</a></nav><div className="sideBottom"><span className="statusDot"/> Live sales tracker</div></aside>
     <section className="content"><header><div className="mobileTitle"><button className="iconBtn"><Menu/></button><b>Squishy</b></div><div className="welcome"><p>Hi! Jom tengok prestasi hari ini ✨</p><h1>Sales Dashboard</h1></div><button className="primary" onClick={openNewSale}><Plus size={18}/> Rekod Jualan</button></header>
-      <div className="hero"><div><span className="heroBadge"><Sparkles size={13}/> SQUISHY SALES</span><h2>Keep selling, keep squishing! 🫧</h2><p>Pantau jualan harian anda dengan cara yang lebih mudah dan fun.</p></div><div className="heroBubble bubbleOne">🧸</div><div className="heroBubble bubbleTwo">💖</div><div className="heroBubble bubbleThree">✨</div></div>
-      <div className="toolbar"><div className="datePill"><CalendarDays size={17}/> 12 September 2026 <span>•</span> Hari ini</div><button className="outline" onClick={exportCsv}><Download size={17}/> Eksport</button></div>
-      <section className="kpis"><Kpi title="Jualan Hari Ini" value={total(todaySales)} icon={<Wallet/>} accent="green"/><Kpi title="Jualan Minggu Ini" value={total(weekSales)} icon={<BarChart3/>} accent="blue"/><Kpi title="Jualan Bulan Ini" value={total(monthSales)} icon={<Receipt/>} accent="purple"/><Kpi title="Transaksi Bulan Ini" value={totalTransactions} icon={<ShoppingBag/>} accent="orange" plain/></section>
-      <section className="charts"><div className="panel trend"><div className="panelHead"><div><h2>Jualan Naik ✨</h2><p>Trend jualan beberapa hari terakhir</p></div><span className="selectMini">September 2026 ▾</span></div><ResponsiveContainer width="100%" height={250}><LineChart data={trend}><CartesianGrid vertical={false} strokeDasharray="3 3"/><XAxis dataKey="name"/><YAxis tickFormatter={v => `RM${v}`}/><Tooltip formatter={(v) => [money(Number(v)), "Jualan"]}/><Line type="monotone" dataKey="jualan" stroke="#8a68ff" strokeWidth={4} dot={{r:5,fill:"#ff5f96",strokeWidth:2}}/></LineChart></ResponsiveContainer></div><div className="panel"><div className="panelHead"><div><h2>Bayaran</h2><p>Bagaimana pelanggan bayar</p></div></div><div className="donut"><ResponsiveContainer width="100%" height={190}><PieChart><Pie data={payments} dataKey="value" nameKey="name" innerRadius={55} outerRadius={78} paddingAngle={3}>{payments.map((_, i) => <Cell key={i} fill={i === 0 ? "#18a66a" : i === 1 ? "#3b82f6" : "#8b5cf6"}/>)}</Pie><Tooltip formatter={(v) => money(Number(v))}/></PieChart></ResponsiveContainer></div><div className="legend">{payments.map((p, i) => <div key={p.name}><i className={`dot d${i}`}/><span>{p.name}</span><b>{money(p.value)}</b></div>)}</div></div></section>
-      <section className="panel tablePanel"><div className="panelHead tableHead"><div><h2>Transaksi Terkini</h2><p>{filtered.length} rekod dipaparkan</p></div><div className="filters"><div className="search"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cari rekod..."/></div><input className="dateFilter" type="date" value={date} onChange={e => setDate(e.target.value)}/></div></div><div className="tableWrap"><table><thead><tr><th>Tarikh & Masa</th><th>Kategori</th><th>Jumlah</th><th>Pembayaran</th><th>Nota</th><th></th></tr></thead><tbody>{filtered.map(s => <tr key={s.id}><td>{dateLabel(s.date)}</td><td><span className="categoryTag">{PRODUCT_CATEGORY} ✨</span></td><td className="amount">{money(s.amount)}</td><td><span className={`payment ${s.payment === "Tunai" ? "cash" : s.payment === "Kad" ? "card" : "qr"}`}>{s.payment}</span></td><td className="muted">{s.note || "—"}</td><td><button className="textBtn" onClick={() => editSale(s)}>Edit</button><button className="deleteBtn" onClick={() => removeSale(s.id)}><Trash2 size={15}/></button></td></tr>)}</tbody></table></div></section>
+      <div className="hero"><div><span className="heroBadge"><Sparkles size={13}/> SQUISHY POS</span><h2>Keep selling, keep squishing! 🫧</h2><p>Urus jualan, produk dan stok Squishy dalam satu dashboard yang simple dan fun.</p></div><div className="heroBubble bubbleOne">🧸</div><div className="heroBubble bubbleTwo">💖</div><div className="heroBubble bubbleThree">✨</div></div>
+      <div className="toolbar"><div className="datePill"><CalendarDays size={17}/> 12 September 2026 <span>•</span> Hari ini</div><div style={{display:"flex",gap:8}}><button className="outline" onClick={() => setOpenProduct(true)}><Package size={16}/> Produk</button><button className="outline" onClick={exportCsv}><Download size={17}/> Eksport</button></div></div>
+      <section className="kpis"><Kpi title="Jualan Hari Ini" value={total(todaySales)} icon={<Wallet/>} accent="green"/><Kpi title="Jualan Minggu Ini" value={total(weekSales)} icon={<BarChart3/>} accent="blue"/><Kpi title="Jualan Bulan Ini" value={total(monthSales)} icon={<Receipt/>} accent="purple"/><Kpi title="Unit Terjual" value={totalUnits} icon={<ShoppingBag/>} accent="orange" plain/></section>
+      <section className="charts"><div className="panel trend"><div className="panelHead"><div><h2>Jualan Naik ✨</h2><p>Trend jualan beberapa hari terakhir</p></div><span className="selectMini">September 2026 ▾</span></div><ResponsiveContainer width="100%" height={250}><LineChart data={trend}><CartesianGrid vertical={false} strokeDasharray="3 3"/><XAxis dataKey="name"/><YAxis tickFormatter={v => `RM${v}`}/><Tooltip formatter={(v) => [money(Number(v)), "Jualan"]}/><Line type="monotone" dataKey="jualan" stroke="#8a68ff" strokeWidth={4} dot={{r:5,fill:"#ff5f96",strokeWidth:2}}/></LineChart></ResponsiveContainer></div><div className="panel"><div className="panelHead"><div><h2>Top Selling 🏆</h2><p>Produk paling banyak terjual</p></div></div><div className="topProducts">{topProducts.map((p, i) => <div className="topProduct" key={p.id}><span className="rank">#{i + 1}</span><div><b>{p.name}</b><small>{p.sku} • {p.stock} stok</small></div><strong>{p.sold} pcs</strong></div>)}</div></div></section>
+      <section className="insights"><div className="panel insight"><div className="kpiIcon purple"><CreditCard/></div><div><span>Anggaran Untung Bulan Ini</span><strong>{money(estimatedProfit)}</strong></div></div><div className="panel insight"><div className="kpiIcon orange"><Package/></div><div><span>Low Stock Alert</span><strong>{lowStock.length} produk</strong></div></div><div className="panel insight"><div className="kpiIcon blue"><ShoppingBag/></div><div><span>Produk Aktif</span><strong>{products.length}</strong></div></div></section>
+      <section className="panel tablePanel"><div className="panelHead tableHead"><div><h2>Transaksi Terkini</h2><p>{filtered.length} rekod dipaparkan</p></div><div className="filters"><div className="search"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cari produk / SKU..."/></div><input className="dateFilter" type="date" value={date} onChange={e => setDate(e.target.value)}/></div></div><div className="tableWrap"><table><thead><tr><th>Tarikh & Masa</th><th>Produk</th><th>Qty</th><th>Jumlah</th><th>Pembayaran</th><th>Nota</th><th></th></tr></thead><tbody>{filtered.map(s => { const p = productMap.get(s.productId); return <tr key={s.id}><td>{dateLabel(s.date)}</td><td><span className="categoryTag">{p?.name ?? "Unknown"}</span><small className="skuText">{p?.sku}</small></td><td>{s.quantity}</td><td className="amount">{money(s.amount)}</td><td><span className={`payment ${s.payment === "Tunai" ? "cash" : s.payment === "Kad" ? "card" : "qr"}`}>{s.payment}</span></td><td className="muted">{s.note || "—"}</td><td><button className="textBtn" onClick={() => editSale(s)}>Edit</button><button className="deleteBtn" onClick={() => removeSale(s.id)}><Trash2 size={15}/></button></td></tr>})}</tbody></table></div></section>
     </section>
-    {openForm && <div className="modalBack"><div className="modal"><div className="modalHead"><div><h2>{editing ? "Edit Jualan ✨" : "Rekod Jualan Baru ✨"}</h2><p>Tambah transaksi Squishy dengan cepat</p></div><button className="iconBtn" onClick={() => setOpenForm(false)}><X/></button></div><div className="formGrid"><label>Tarikh & Masa<input type="datetime-local" value={form.date} onChange={e => setForm({...form, date:e.target.value})}/></label><label>Kategori<select value={PRODUCT_CATEGORY} disabled><option>{PRODUCT_CATEGORY}</option></select></label><label>Jumlah Jualan (RM)<input type="number" min="0" step="0.01" value={form.amount || ""} onChange={e => setForm({...form, amount:Number(e.target.value)})}/></label><label>Kaedah Pembayaran<select value={form.payment} onChange={e => setForm({...form, payment:e.target.value as Payment})}><option>Tunai</option><option>QR / Online Transfer</option><option>Kad</option></select></label><label className="full">Nota / Catatan<textarea rows={3} value={form.note} onChange={e => setForm({...form, note:e.target.value})} placeholder="Contoh: 2 pcs, customer repeat, promo..."/></label></div><div className="modalActions"><button className="outline" onClick={() => setOpenForm(false)}>Batal</button><button className="primary" onClick={saveSale}>{editing ? "Simpan Perubahan" : "Simpan Jualan"}</button></div></div></div>}
+    {openForm && <div className="modalBack"><div className="modal"><div className="modalHead"><div><h2>{editing ? "Edit Jualan ✨" : "Rekod Jualan Baru ✨"}</h2><p>Stok akan dikemaskini secara automatik</p></div><button className="iconBtn" onClick={() => setOpenForm(false)}><X/></button></div><div className="formGrid"><label>Tarikh & Masa<input type="datetime-local" value={form.date} onChange={e => setForm({...form, date:e.target.value})}/></label><label>Produk<select value={form.productId} onChange={e => setForm({...form, productId:Number(e.target.value), quantity:1})}>{products.map(p => <option key={p.id} value={p.id}>{p.name} — {money(p.price)}</option>)}</select></label><label>Kuantiti<input type="number" min="1" max={productMap.get(form.productId)?.stock ?? 1} step="1" value={form.quantity} onChange={e => setForm({...form, quantity:Number(e.target.value)})}/><small className="stockHint">Stok tersedia: {productMap.get(form.productId)?.stock ?? 0}</small></label><label>Kaedah Pembayaran<select value={form.payment} onChange={e => setForm({...form, payment:e.target.value as Payment})}><option>Tunai</option><option>QR / Online Transfer</option><option>Kad</option></select></label><label className="full">Nota / Catatan<textarea rows={3} value={form.note} onChange={e => setForm({...form, note:e.target.value})} placeholder="Contoh: repeat customer, promo..."/></label></div><div className="saleTotal">Jumlah: <b>{money((productMap.get(form.productId)?.price ?? 0) * form.quantity)}</b></div><div className="modalActions"><button className="outline" onClick={() => setOpenForm(false)}>Batal</button><button className="primary" onClick={saveSale}>{editing ? "Simpan Perubahan" : "Simpan Jualan"}</button></div></div></div>}
+    {openProduct && <div className="modalBack"><div className="modal"><div className="modalHead"><div><h2>Tambah Produk 🧸</h2><p>Masukkan produk Squishy dan stok permulaan</p></div><button className="iconBtn" onClick={() => setOpenProduct(false)}><X/></button></div><div className="formGrid"><label>Nama Produk<input value={productForm.name} onChange={e => setProductForm({...productForm,name:e.target.value})} placeholder="Contoh: Squishy Panda"/></label><label>SKU<input value={productForm.sku} onChange={e => setProductForm({...productForm,sku:e.target.value.toUpperCase()})} placeholder="SQ-PANDA"/></label><label>Harga Jual (RM)<input type="number" min="0" step="0.01" value={productForm.price || ""} onChange={e => setProductForm({...productForm,price:Number(e.target.value)})}/></label><label>Kos Produk (RM)<input type="number" min="0" step="0.01" value={productForm.cost || ""} onChange={e => setProductForm({...productForm,cost:Number(e.target.value)})}/></label><label>Stok Awal<input type="number" min="0" step="1" value={productForm.stock} onChange={e => setProductForm({...productForm,stock:Number(e.target.value)})}/></label><label>Alert Bila Stok ≤<input type="number" min="0" step="1" value={productForm.lowStock} onChange={e => setProductForm({...productForm,lowStock:Number(e.target.value)})}/></label></div><div className="modalActions"><button className="outline" onClick={() => setOpenProduct(false)}>Batal</button><button className="primary" onClick={addProduct}><Plus size={16}/> Tambah Produk</button></div></div></div>}
   </main>
 }
 
