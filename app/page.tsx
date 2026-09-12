@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, CalendarDays, CreditCard, Download, LayoutDashboard, Menu, Package, Plus, Receipt, Search, ShoppingBag, Sparkles, Trash2, Wallet, X, ArrowDownToLine, AlertTriangle, Boxes } from "lucide-react";
+import { BarChart3, CalendarDays, CreditCard, Download, LayoutDashboard, Menu, Package, Plus, Receipt, Search, ShoppingBag, Sparkles, Trash2, Wallet, X, ArrowDownToLine, AlertTriangle, Boxes, Minus, CheckCircle2 } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 type Payment = "Tunai" | "QR / Online Transfer" | "Kad";
@@ -9,6 +9,7 @@ type View = "dashboard" | "pos" | "products" | "reports";
 type Product = { id: number; name: string; sku: string; price: number; cost: number; stock: number; lowStock: number };
 type Sale = { id: number; date: string; productId: number; quantity: number; amount: number; payment: Payment; note: string };
 type StockMovement = { id: number; productId: number; quantity: number; date: string; note: string };
+type CartItem = { productId: number; quantity: number };
 
 const seedProducts: Product[] = [
   { id: 1, name: "Squishy Bear", sku: "SQ-BEAR", price: 18, cost: 8, stock: 24, lowStock: 5 },
@@ -44,7 +45,9 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [date, setDate] = useState("");
   const [productQuery, setProductQuery] = useState("");
-  const [form, setForm] = useState({ date: "", productId: 1, quantity: 1, payment: "Tunai" as Payment, note: "" });
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [salePayment, setSalePayment] = useState<Payment>("Tunai");
+  const [saleNote, setSaleNote] = useState("");
   const [productForm, setProductForm] = useState({ name: "", sku: "", price: 0, cost: 0, stock: 0, lowStock: 5 });
   const [stockForm, setStockForm] = useState({ quantity: 1, note: "Restock" });
 
@@ -66,29 +69,29 @@ export default function Home() {
   const estimatedProfit = monthSales.reduce((sum, s) => { const p = productMap.get(s.productId); return sum + s.amount - (p?.cost ?? 0) * s.quantity; }, 0);
   const stockValue = products.reduce((sum, p) => sum + p.cost * p.stock, 0);
   const potentialSalesValue = products.reduce((sum, p) => sum + p.price * p.stock, 0);
+  const cartTotal = cart.reduce((sum, item) => sum + (productMap.get(item.productId)?.price ?? 0) * item.quantity, 0);
+  const cartUnits = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   function go(next: View) { setView(next); }
-  function openNewSale() { setEditing(null); setForm({ date: localDateTime(), productId: products[0]?.id ?? 1, quantity: 1, payment: "Tunai", note: "" }); setOpenSale(true); }
-  function editSale(s: Sale) { setEditing(s); setForm({ date: s.date, productId: s.productId, quantity: s.quantity, payment: s.payment, note: s.note }); setOpenSale(true); }
+  function openNewSale() { setEditing(null); setCart([]); setSalePayment("Tunai"); setSaleNote(""); setOpenSale(true); }
+  function addToCart(productId: number) { const p = productMap.get(productId); if (!p || p.stock <= 0) return; setCart(prev => { const existing = prev.find(x => x.productId === productId); if (existing) { if (existing.quantity >= p.stock) return prev; return prev.map(x => x.productId === productId ? { ...x, quantity: x.quantity + 1 } : x); } return [...prev, { productId, quantity: 1 }]; }); }
+  function changeCartQty(productId: number, delta: number) { const p = productMap.get(productId); if (!p) return; setCart(prev => prev.map(x => x.productId === productId ? { ...x, quantity: Math.min(p.stock, Math.max(0, x.quantity + delta)) } : x).filter(x => x.quantity > 0)); }
+  function removeCartItem(productId: number) { setCart(prev => prev.filter(x => x.productId !== productId)); }
+  function editSale(s: Sale) { setEditing(s); setCart([{ productId: s.productId, quantity: s.quantity }]); setSalePayment(s.payment); setSaleNote(s.note); setOpenSale(true); }
   function saveSale() {
-    const product = productMap.get(form.productId); if (!product || !form.date || form.quantity <= 0) return;
+    if (!cart.length) return;
     const old = editing ? sales.find(s => s.id === editing.id) : null;
-    const available = product.stock + (old?.productId === product.id ? old.quantity : 0);
-    if (form.quantity > available) return;
-    const amount = product.price * form.quantity;
+    const availableFor = (p: Product, requested: number) => p.stock + (old?.productId === p.id ? old.quantity : 0);
+    for (const item of cart) { const p = productMap.get(item.productId); if (!p || item.quantity <= 0 || item.quantity > availableFor(p, item.quantity)) return; }
     if (old) {
-      setProducts(prev => prev.map(p => {
-        if (p.id === old.productId && p.id === product.id) return { ...p, stock: p.stock + old.quantity - form.quantity };
-        if (p.id === old.productId) return { ...p, stock: p.stock + old.quantity };
-        if (p.id === product.id) return { ...p, stock: p.stock - form.quantity };
-        return p;
-      }));
-      setSales(prev => prev.map(s => s.id === old.id ? { ...s, ...form, amount } : s));
+      setProducts(prev => prev.map(p => { const oldQty = old.productId === p.id ? old.quantity : 0; const newQty = cart.find(x => x.productId === p.id)?.quantity ?? 0; return { ...p, stock: p.stock + oldQty - newQty }; }));
+      setSales(prev => { const first = cart[0]; const amount = cart.reduce((sum, x) => sum + (productMap.get(x.productId)?.price ?? 0) * x.quantity, 0); return prev.map(s => s.id === old.id ? { ...s, productId: first.productId, quantity: cartUnits, amount, payment: salePayment, note: saleNote } : s); });
     } else {
-      setProducts(prev => prev.map(p => p.id === product.id ? { ...p, stock: p.stock - form.quantity } : p));
-      setSales(prev => [{ ...form, amount, id: Date.now() }, ...prev]);
+      setProducts(prev => prev.map(p => { const item = cart.find(x => x.productId === p.id); return item ? { ...p, stock: p.stock - item.quantity } : p; }));
+      const stamp = localDateTime();
+      setSales(prev => cart.map(item => { const p = productMap.get(item.productId)!; return { id: Date.now() + item.productId, date: stamp, productId: item.productId, quantity: item.quantity, amount: p.price * item.quantity, payment: salePayment, note: saleNote }; }).concat(prev));
     }
-    setOpenSale(false); setEditing(null);
+    setOpenSale(false); setEditing(null); setCart([]);
   }
   function removeSale(id: number) { const sale = sales.find(s => s.id === id); if (!sale) return; if (confirm("Padam rekod jualan ini? Stok akan dipulangkan.")) { setProducts(prev => prev.map(p => p.id === sale.productId ? { ...p, stock: p.stock + sale.quantity } : p)); setSales(prev => prev.filter(s => s.id !== id)); } }
   function addProduct() { if (!productForm.name.trim() || !productForm.sku.trim() || productForm.price <= 0) return; setProducts(prev => [...prev, { ...productForm, id: Date.now() }]); setProductForm({ name: "", sku: "", price: 0, cost: 0, stock: 0, lowStock: 5 }); setOpenProduct(false); }
@@ -117,11 +120,15 @@ export default function Home() {
       </>}
 
       {view === "products" && <ProductPage products={products} lowStock={lowStock} filteredProducts={filteredProducts} productQuery={productQuery} setProductQuery={setProductQuery} openRestock={openRestock} setOpenProduct={setOpenProduct} stockValue={stockValue} potentialSalesValue={potentialSalesValue}/>} 
-      {view === "pos" && <div className="pagePanel panel"><div className="emptyState"><div className="bigIcon"><ShoppingBag/></div><h2>POS / Jualan</h2><p>Rekod jualan dengan pantas dan stok akan ditolak secara automatik.</p><button className="primary" onClick={openNewSale}><Plus size={18}/> Rekod Jualan</button></div></div>}
+      {view === "pos" && <PosPage products={products} lowStock={lowStock} addToCart={addToCart} cartUnits={cartUnits} cartTotal={cartTotal} openNewSale={openNewSale}/>} 
       {view === "reports" && <ReportPage sales={sales} monthSales={monthSales} productMap={productMap} totalUnits={totalUnits} estimatedProfit={estimatedProfit} exportCsv={exportCsv}/>} 
     </section>
 
-    {openSale && <div className="modalBack"><div className="modal"><div className="modalHead"><div><h2>{editing ? "Edit Jualan ✨" : "Rekod Jualan Baru ✨"}</h2><p>Tarikh & masa diambil automatik daripada waktu sistem.</p></div><button className="iconBtn" onClick={() => setOpenSale(false)}><X/></button></div><div className="formGrid"><label>Tarikh & Masa<input type="datetime-local" value={form.date} onChange={e => setForm({...form,date:e.target.value})}/></label><label>Produk<select value={form.productId} onChange={e => setForm({...form,productId:Number(e.target.value)})}>{products.map(p => <option key={p.id} value={p.id}>{p.name} — {money(p.price)} — {p.stock} stok</option>)}</select><small className="stockHint">Stok tersedia akan ditolak selepas simpan.</small></label><label>Quantity<input type="number" min="1" value={form.quantity} onChange={e => setForm({...form,quantity:Number(e.target.value)})}/></label><label>Pembayaran<select value={form.payment} onChange={e => setForm({...form,payment:e.target.value as Payment})}><option>Tunai</option><option>QR / Online Transfer</option><option>Kad</option></select></label><label className="full">Nota<textarea rows={3} value={form.note} onChange={e => setForm({...form,note:e.target.value})} placeholder="Contoh: Repeat customer / Promo"/></label></div><div className="saleTotal">Jumlah <b>{money((productMap.get(form.productId)?.price ?? 0) * form.quantity)}</b></div><div className="modalActions"><button className="outline" onClick={() => setOpenSale(false)}>Batal</button><button className="primary" onClick={saveSale}>Simpan Jualan</button></div></div></div>}
+    {openSale && <div className="modalBack"><div className="modal posModal"><div className="modalHead"><div><h2>{editing ? "Edit Jualan ✨" : "POS — Pelbagai Produk 🛒"}</h2><p>{editing ? "Edit transaksi jualan." : "Pilih satu atau lebih produk dalam satu pembelian."}</p></div><button className="iconBtn" onClick={() => setOpenSale(false)}><X/></button></div>
+      <div className="posCheckout"><div className="posProducts"><div className="posSearch"><Search size={16}/><input value={productQuery} onChange={e => setProductQuery(e.target.value)} placeholder="Cari produk / SKU..."/></div><div className="posProductGrid">{filteredProducts.map(p => <button className={`posProduct ${p.stock <= p.lowStock ? "low" : ""}`} key={p.id} onClick={() => addToCart(p.id)} disabled={p.stock <= 0}><span className="posEmoji">🫧</span><b>{p.name}</b><small>{p.sku}</small><strong>{money(p.price)}</strong><em>{p.stock} stok</em></button>)}</div></div>
+      <div className="cartPanel"><div className="cartHeader"><div><h3>Cart</h3><span>{cartUnits} unit • {cart.length} produk</span></div><ShoppingBag size={20}/></div><div className="cartItems">{cart.length ? cart.map(item => { const p = productMap.get(item.productId); if (!p) return null; return <div className="cartItem" key={item.productId}><div className="cartItemInfo"><b>{p.name}</b><small>{money(p.price)} × {item.quantity}</small></div><div className="qty"><button onClick={() => changeCartQty(p.id,-1)}><Minus size={13}/></button><b>{item.quantity}</b><button onClick={() => changeCartQty(p.id,1)}><Plus size={13}/></button></div><strong>{money(p.price * item.quantity)}</strong><button className="deleteBtn" onClick={() => removeCartItem(p.id)}><Trash2 size={14}/></button></div>}) : <div className="cartEmpty"><ShoppingBag size={28}/><p>Cart kosong</p><small>Klik produk untuk masukkan ke cart.</small></div>}</div>
+        <div className="cartBottom"><label>Pembayaran<select value={salePayment} onChange={e => setSalePayment(e.target.value as Payment)}><option>Tunai</option><option>QR / Online Transfer</option><option>Kad</option></select></label><label>Nota<input value={saleNote} onChange={e => setSaleNote(e.target.value)} placeholder="Contoh: Promo / repeat customer"/></label><div className="cartGrand"><span>Total</span><b>{money(cartTotal)}</b></div><button className="primary checkoutBtn" disabled={!cart.length} onClick={saveSale}><CheckCircle2 size={18}/> {editing ? "Simpan Perubahan" : "Complete Sale"}</button></div>
+      </div></div></div></div>}
 
     {openProduct && <div className="modalBack"><div className="modal"><div className="modalHead"><div><h2>Tambah Produk 📦</h2><p>Masukkan maklumat produk dan stok awal.</p></div><button className="iconBtn" onClick={() => setOpenProduct(false)}><X/></button></div><div className="formGrid"><label>Nama Produk<input value={productForm.name} onChange={e => setProductForm({...productForm,name:e.target.value})} placeholder="Squishy Bunny"/></label><label>SKU<input value={productForm.sku} onChange={e => setProductForm({...productForm,sku:e.target.value.toUpperCase()})} placeholder="SQ-BUNNY"/></label><label>Harga Jual (RM)<input type="number" min="0" value={productForm.price || ""} onChange={e => setProductForm({...productForm,price:Number(e.target.value)})}/></label><label>Kos (RM)<input type="number" min="0" value={productForm.cost || ""} onChange={e => setProductForm({...productForm,cost:Number(e.target.value)})}/></label><label>Stok Awal<input type="number" min="0" value={productForm.stock} onChange={e => setProductForm({...productForm,stock:Number(e.target.value)})}/></label><label>Low Stock Threshold<input type="number" min="0" value={productForm.lowStock} onChange={e => setProductForm({...productForm,lowStock:Number(e.target.value)})}/></label></div><div className="modalActions"><button className="outline" onClick={() => setOpenProduct(false)}>Batal</button><button className="primary" onClick={addProduct}>Tambah Produk</button></div></div></div>}
 
@@ -140,7 +147,9 @@ function ProductPage({ products, lowStock, filteredProducts, productQuery, setPr
   <section className="productSection"><div className="productToolbar"><div><h2>Senarai Produk</h2><p>Urus harga, SKU dan stok dengan mudah.</p></div><div className="search"><Search size={16}/><input value={productQuery} onChange={(e:any) => setProductQuery(e.target.value)} placeholder="Cari produk / SKU..."/></div></div><div className="productGrid">{filteredProducts.map((p:any) => { const low = p.stock <= p.lowStock; return <div className={`productCard ${low ? "isLow" : ""}`} key={p.id}><div className="productVisual">🫧</div><div className="productBody"><div className="productTitle"><div><h3>{p.name}</h3><span>{p.sku}</span></div>{low ? <span className="lowBadge">LOW STOCK</span> : <span className="okBadge">OK</span>}</div><div className="productPrice">{money(p.price)} <small>harga jual</small></div><div className="productMeta"><span>Kos <b>{money(p.cost)}</b></span><span>Margin <b>{money(p.price - p.cost)}</b></span></div><div className="stockBarHead"><span>Stok</span><b>{p.stock} unit</b></div><div className="stockBar"><i style={{width:`${Math.min(100, Math.max(4, (p.stock / Math.max(p.lowStock * 5, 1)) * 100))}%`}}/></div><button className="stockInBtn" onClick={() => openRestock(p)}><ArrowDownToLine size={16}/> Stock In</button></div></div>})}</div></section>
 </>; }
 
-function ReportPage({ sales, monthSales, productMap, totalUnits, estimatedProfit, exportCsv }: any) { const byPayment = ["Tunai", "QR / Online Transfer", "Kad"].map(payment => ({ payment, total: monthSales.filter((s:any) => s.payment === payment).reduce((a:number,s:any) => a+s.amount,0) })); return <>
+function PosPage({ products, lowStock, addToCart, cartUnits, cartTotal, openNewSale }: any) { return <div className="posLanding"><div className="panel posIntro"><div><span className="heroBadge">QUICK CHECKOUT</span><h2>POS Pelbagai Produk 🛒</h2><p>Pelanggan boleh pilih banyak produk dalam satu pembelian. Quantity dan stok akan dikawal automatik.</p><button className="primary" onClick={openNewSale}><ShoppingBag size={18}/> Buka POS</button></div><div className="posSummary"><b>{products.length}</b><span>Produk</span><b>{products.reduce((a:any,p:any)=>a+p.stock,0)}</b><span>Unit stok</span><b>{lowStock.length}</b><span>Low stock</span></div></div><div className="posQuickGrid">{products.map((p:any)=><button key={p.id} className="quickProduct" onClick={() => { addToCart(p.id); openNewSale(); }}><span>🫧</span><b>{p.name}</b><small>{money(p.price)} • {p.stock} stok</small></button>)}</div></div>; }
+
+function ReportPage({ sales, monthSales, productMap, totalUnits, estimatedProfit, exportCsv }: any) { const byPayment = ["Tunai", "QR / Online Transfer", "Kad"].map(payment => ({ payment, total: monthSales.filter((s:any) => s.payment === payment).reduce((a:number,s:any)=>a+s.amount,0) })); return <>
   <div className="toolbar"><div className="datePill"><BarChart3 size={17}/> Ringkasan bulan semasa</div><button className="outline" onClick={exportCsv}><Download size={17}/> Eksport CSV</button></div>
   <section className="kpis"><Kpi title="Jumlah Jualan" value={monthSales.reduce((a:number,s:any)=>a+s.amount,0)} icon={<Receipt/>} accent="purple"/><Kpi title="Unit Terjual" value={totalUnits} icon={<ShoppingBag/>} accent="orange" plain/><Kpi title="Anggaran Untung" value={estimatedProfit} icon={<Wallet/>} accent="green"/><Kpi title="Transaksi" value={monthSales.length} icon={<CreditCard/>} accent="blue" plain/></section>
   <section className="panel reportList"><div className="panelHead"><div><h2>Pembayaran Bulan Ini</h2><p>Pecahan mengikut kaedah pembayaran</p></div></div>{byPayment.map(x => <div className="reportRow" key={x.payment}><span>{x.payment}</span><b>{money(x.total)}</b></div>)}</section>
