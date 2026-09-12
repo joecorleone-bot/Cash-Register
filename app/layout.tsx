@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./products.css";
 
 export const metadata: Metadata = {
   title: "Cash Register | Sales Dashboard",
