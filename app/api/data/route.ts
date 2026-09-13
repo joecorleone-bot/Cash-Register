@@ -3,71 +3,240 @@ import { sql } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+const payments = ['Tunai', 'QR / Online Transfer', 'Kad'] as const;
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Ralat pangkalan data';
+}
+
 export async function GET() {
-  const [products, transactions, movements] = await Promise.all([
-    sql`SELECT id, name, sku, price::float8 AS price, cost::float8 AS cost, stock, low_stock AS "lowStock" FROM products ORDER BY id`,
-    sql`SELECT t.id, t.receipt_no AS "receiptNo", t.sold_at AS date, t.total::float8 AS total, t.payment, t.note,
-        COALESCE(json_agg(json_build_object('productId', ti.product_id, 'quantity', ti.quantity, 'unitPrice', ti.unit_price::float8, 'subtotal', ti.subtotal::float8) ORDER BY ti.id) FILTER (WHERE ti.id IS NOT NULL), '[]') AS items
-        FROM transactions t LEFT JOIN transaction_items ti ON ti.transaction_id = t.id
-        GROUP BY t.id ORDER BY t.sold_at DESC`,
-    sql`SELECT id, product_id AS "productId", quantity, movement_type AS "movementType", transaction_id AS "transactionId", moved_at AS date, note FROM stock_movements ORDER BY moved_at DESC`,
-  ]);
-  return NextResponse.json({ products, transactions, movements });
+  try {
+    const [products, transactions, movements] = await Promise.all([
+      sql`SELECT id, name, sku, price::float8 AS price, cost::float8 AS cost, stock, low_stock AS "lowStock" FROM products ORDER BY id`,
+      sql`SELECT t.receipt_no AS id, t.receipt_no AS "receiptNo", t.sold_at AS date, t.total::float8 AS total, t.payment, t.note,
+          COALESCE(json_agg(json_build_object('productId', ti.product_id, 'quantity', ti.quantity, 'unitPrice', ti.unit_price::float8, 'subtotal', ti.subtotal::float8) ORDER BY ti.id) FILTER (WHERE ti.id IS NOT NULL), '[]') AS items
+          FROM transactions t LEFT JOIN transaction_items ti ON ti.transaction_id = t.id
+          GROUP BY t.id ORDER BY t.sold_at DESC`,
+      sql`SELECT id, product_id AS "productId", quantity, movement_type AS "movementType", transaction_id AS "transactionId", moved_at AS date, note FROM stock_movements ORDER BY moved_at DESC LIMIT 500`,
+    ]);
+    return NextResponse.json({ products, transactions, movements });
+  } catch (error) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
-  const body = await request.json();
-  const action = body?.action;
+  try {
+    const body = await request.json();
+    const action = body?.action;
 
-  if (action === 'product') {
-    const [product] = await sql`
-      INSERT INTO products (name, sku, price, cost, stock, low_stock)
-      VALUES (${body.name}, ${body.sku}, ${body.price}, ${body.cost ?? 0}, ${body.stock ?? 0}, ${body.lowStock ?? 5})
-      RETURNING id, name, sku, price::float8 AS price, cost::float8 AS cost, stock, low_stock AS "lowStock"`;
-    return NextResponse.json(product, { status: 201 });
+    if (action === 'product') {
+      const price = Number(body.price);
+      const cost = Number(body.cost ?? 0);
+      const stock = Number(body.stock ?? 0);
+      const lowStock = Number(body.lowStock ?? 5);
+      if (!body.name?.trim() || !body.sku?.trim() || !Number.isFinite(price) || price <= 0) {
+        return NextResponse.json({ error: 'Maklumat produk tidak sah' }, { status: 400 });
+      }
+      const [product] = await sql`
+        INSERT INTO products (name, sku, price, cost, stock, low_stock)
+        VALUES (${body.name.trim()}, ${body.sku.trim().toUpperCase()}, ${price}, ${Math.max(0, cost)}, ${Math.max(0, Math.trunc(stock))}, ${Math.max(0, Math.trunc(lowStock))})
+        RETURNING id, name, sku, price::float8 AS price, cost::float8 AS cost, stock, low_stock AS "lowStock"`;
+      return NextResponse.json(product, { status: 201 });
+    }
+
+    if (action === 'stock-in') {
+      const productId = Number(body.productId);
+      const qty = Number(body.quantity);
+      if (!Number.isInteger(productId) || !Number.isInteger(qty) || qty <= 0) {
+        return NextResponse.json({ error: 'Kuantiti atau produk tidak sah' }, { status: 400 });
+      }
+      const [result] = await sql`
+        WITH updated AS (
+          UPDATE products SET stock = stock + ${qty}, updated_at = NOW()
+          WHERE id = ${productId}
+          RETURNING id, name, sku, price::float8 AS price, cost::float8 AS cost, stock, low_stock AS "lowStock"
+        ), movement AS (
+          INSERT INTO stock_movements (product_id, quantity, movement_type, note)
+          SELECT id, ${qty}, 'STOCK_IN', ${body.note ?? 'Restock'} FROM updated
+          RETURNING id
+        )
+        SELECT * FROM updated`;
+      if (!result) return NextResponse.json({ error: 'Produk tidak dijumpai' }, { status: 404 });
+      return NextResponse.json(result);
+    }
+
+    if (action === 'checkout') {
+      const items = Array.isArray(body.items) ? body.items : [];
+      const payment = body.payment;
+      if (!items.length) return NextResponse.json({ error: 'Cart kosong' }, { status: 400 });
+      if (!payments.includes(payment)) return NextResponse.json({ error: 'Kaedah pembayaran tidak sah' }, { status: 400 });
+      const payload = JSON.stringify(items.map((i: { productId: number; quantity: number }) => ({ productId: Number(i.productId), quantity: Number(i.quantity) })));
+
+      const [transaction] = await sql`
+        WITH input AS (
+          SELECT "productId" AS product_id, SUM(quantity)::int AS quantity
+          FROM jsonb_to_recordset(${payload}::jsonb) AS x("productId" bigint, quantity int)
+          GROUP BY "productId"
+        ),
+        product_state AS MATERIALIZED (
+          SELECT p.id, p.price, p.stock, i.quantity
+          FROM products p JOIN input i ON i.product_id = p.id
+          FOR UPDATE OF p
+        ),
+        valid AS (
+          SELECT (SELECT COUNT(*) FROM input) > 0
+            AND (SELECT COUNT(*) FROM input) = COUNT(*)
+            AND COALESCE(bool_and(quantity > 0 AND stock >= quantity), false) AS ok
+          FROM product_state
+        ),
+        counter AS (
+          INSERT INTO receipt_counters (sale_date, next_no)
+          SELECT (NOW() AT TIME ZONE 'Asia/Kuala_Lumpur')::date, 2 FROM valid WHERE ok
+          ON CONFLICT (sale_date) DO UPDATE SET next_no = receipt_counters.next_no + 1
+          RETURNING sale_date, next_no - 1 AS seq
+        ),
+        tx AS (
+          INSERT INTO transactions (receipt_no, sold_at, total, payment, note)
+          SELECT 'SQ-' || to_char(c.sale_date, 'YYYYMMDD') || '-' || lpad(c.seq::text, 4, '0'),
+                 NOW(), SUM(ps.price * ps.quantity), ${payment}, ${body.note ?? ''}
+          FROM counter c CROSS JOIN product_state ps
+          GROUP BY c.sale_date, c.seq
+          RETURNING id, receipt_no, sold_at, total, payment, note
+        ),
+        item_rows AS (
+          INSERT INTO transaction_items (transaction_id, product_id, quantity, unit_price, subtotal)
+          SELECT tx.id, ps.id, ps.quantity, ps.price, ps.price * ps.quantity
+          FROM tx CROSS JOIN product_state ps
+          RETURNING product_id, quantity, unit_price, subtotal
+        ),
+        stock_update AS (
+          UPDATE products p SET stock = p.stock - ps.quantity, updated_at = NOW()
+          FROM product_state ps, valid v
+          WHERE v.ok AND p.id = ps.id
+          RETURNING p.id
+        ),
+        movement_rows AS (
+          INSERT INTO stock_movements (product_id, quantity, movement_type, transaction_id, note)
+          SELECT ps.id, -ps.quantity, 'SALE', tx.id, COALESCE(NULLIF(${body.note ?? ''}, ''), 'Sale')
+          FROM tx CROSS JOIN product_state ps
+          RETURNING id
+        )
+        SELECT tx.receipt_no AS id, tx.receipt_no AS "receiptNo", tx.sold_at AS date,
+               tx.total::float8 AS total, tx.payment, tx.note,
+               COALESCE((SELECT json_agg(json_build_object('productId', ir.product_id, 'quantity', ir.quantity, 'unitPrice', ir.unit_price::float8, 'subtotal', ir.subtotal::float8)) FROM item_rows ir), '[]') AS items
+        FROM tx`;
+
+      if (!transaction) {
+        return NextResponse.json({ error: 'Stok tidak mencukupi atau item tidak sah' }, { status: 409 });
+      }
+      return NextResponse.json(transaction, { status: 201 });
+    }
+
+    if (action === 'update-transaction') {
+      const receiptNo = String(body.receiptNo ?? '');
+      const items = Array.isArray(body.items) ? body.items : [];
+      const payment = body.payment;
+      if (!receiptNo || !items.length || !payments.includes(payment)) {
+        return NextResponse.json({ error: 'Transaksi tidak sah' }, { status: 400 });
+      }
+      const payload = JSON.stringify(items.map((i: { productId: number; quantity: number }) => ({ productId: Number(i.productId), quantity: Number(i.quantity) })));
+      const [transaction] = await sql`
+        WITH target AS MATERIALIZED (
+          SELECT id, receipt_no, sold_at FROM transactions WHERE receipt_no = ${receiptNo} FOR UPDATE
+        ),
+        old_items AS (
+          SELECT ti.product_id, SUM(ti.quantity)::int AS quantity FROM transaction_items ti JOIN target t ON t.id = ti.transaction_id GROUP BY ti.product_id
+        ),
+        input AS (
+          SELECT "productId" AS product_id, SUM(quantity)::int AS quantity
+          FROM jsonb_to_recordset(${payload}::jsonb) AS x("productId" bigint, quantity int)
+          GROUP BY "productId"
+        ),
+        product_state AS MATERIALIZED (
+          SELECT p.id, p.price, p.stock, i.quantity AS new_qty, COALESCE(o.quantity,0) AS old_qty
+          FROM products p JOIN input i ON i.product_id = p.id LEFT JOIN old_items o ON o.product_id = p.id
+          FOR UPDATE OF p
+        ),
+        valid AS (
+          SELECT EXISTS(SELECT 1 FROM target)
+            AND (SELECT COUNT(*) FROM input) > 0
+            AND (SELECT COUNT(*) FROM input) = COUNT(*)
+            AND COALESCE(bool_and(new_qty > 0 AND stock + old_qty >= new_qty), false) AS ok
+          FROM product_state
+        ),
+        stock_adjust AS (
+          UPDATE products p
+          SET stock = p.stock + COALESCE(o.quantity,0) - COALESCE(i.quantity,0), updated_at = NOW()
+          FROM target t, valid v,
+               (SELECT product_id FROM old_items UNION SELECT product_id FROM input) ids
+          LEFT JOIN old_items o ON o.product_id = ids.product_id
+          LEFT JOIN input i ON i.product_id = ids.product_id
+          WHERE v.ok AND p.id = ids.product_id
+          RETURNING p.id
+        ),
+        deleted_items AS (
+          DELETE FROM transaction_items WHERE transaction_id = (SELECT id FROM target) AND (SELECT ok FROM valid) RETURNING product_id, quantity
+        ),
+        updated_tx AS (
+          UPDATE transactions t SET total = x.total, payment = ${payment}, note = ${body.note ?? ''}
+          FROM (SELECT SUM(price * new_qty) AS total FROM product_state) x, valid v
+          WHERE v.ok AND t.id = (SELECT id FROM target)
+          RETURNING t.id, t.receipt_no, t.sold_at, t.total, t.payment, t.note
+        ),
+        inserted_items AS (
+          INSERT INTO transaction_items (transaction_id, product_id, quantity, unit_price, subtotal)
+          SELECT ut.id, ps.id, ps.new_qty, ps.price, ps.price * ps.new_qty FROM updated_tx ut CROSS JOIN product_state ps
+          RETURNING product_id, quantity, unit_price, subtotal
+        ),
+        restored_moves AS (
+          INSERT INTO stock_movements(product_id, quantity, movement_type, transaction_id, note)
+          SELECT o.product_id, o.quantity, 'ADJUSTMENT', ut.id, 'Edit transaction - restore previous stock'
+          FROM old_items o CROSS JOIN updated_tx ut RETURNING id
+        ),
+        sale_moves AS (
+          INSERT INTO stock_movements(product_id, quantity, movement_type, transaction_id, note)
+          SELECT ps.id, -ps.new_qty, 'SALE', ut.id, 'Edited sale' FROM product_state ps CROSS JOIN updated_tx ut RETURNING id
+        )
+        SELECT ut.receipt_no AS id, ut.receipt_no AS "receiptNo", ut.sold_at AS date, ut.total::float8 AS total, ut.payment, ut.note,
+               COALESCE((SELECT json_agg(json_build_object('productId', ii.product_id, 'quantity', ii.quantity, 'unitPrice', ii.unit_price::float8, 'subtotal', ii.subtotal::float8)) FROM inserted_items ii), '[]') AS items
+        FROM updated_tx ut`;
+      if (!transaction) return NextResponse.json({ error: 'Transaksi tidak dijumpai atau stok tidak mencukupi' }, { status: 409 });
+      return NextResponse.json(transaction);
+    }
+
+    if (action === 'delete-transaction') {
+      const receiptNo = String(body.receiptNo ?? '');
+      if (!receiptNo) return NextResponse.json({ error: 'Receipt No. diperlukan' }, { status: 400 });
+      const [deleted] = await sql`
+        WITH target AS MATERIALIZED (
+          SELECT id, receipt_no FROM transactions WHERE receipt_no = ${receiptNo} FOR UPDATE
+        ),
+        restore_qty AS (
+          SELECT ti.product_id, SUM(ti.quantity)::int AS quantity FROM transaction_items ti JOIN target t ON t.id = ti.transaction_id GROUP BY ti.product_id
+        ),
+        restored AS (
+          UPDATE products p SET stock = p.stock + r.quantity, updated_at = NOW()
+          FROM restore_qty r WHERE p.id = r.product_id
+          RETURNING p.id
+        ),
+        movements AS (
+          INSERT INTO stock_movements(product_id, quantity, movement_type, transaction_id, note)
+          SELECT r.product_id, r.quantity, 'ADJUSTMENT', t.id, 'Transaction deleted - stock restored'
+          FROM restore_qty r CROSS JOIN target t RETURNING id
+        ),
+        gone AS (
+          DELETE FROM transactions t WHERE t.id = (SELECT id FROM target) RETURNING t.receipt_no
+        )
+        SELECT receipt_no AS "receiptNo" FROM gone`;
+      if (!deleted) return NextResponse.json({ error: 'Transaksi tidak dijumpai' }, { status: 404 });
+      return NextResponse.json({ ok: true, ...deleted });
+    }
+
+    return NextResponse.json({ error: 'Action tidak disokong' }, { status: 400 });
+  } catch (error) {
+    const message = errorMessage(error);
+    const status = /duplicate key|unique/i.test(message) ? 409 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
-
-  if (action === 'stock-in') {
-    const [product] = await sql`SELECT id, stock FROM products WHERE id = ${body.productId} FOR UPDATE`;
-    if (!product) return NextResponse.json({ error: 'Produk tidak dijumpai' }, { status: 404 });
-    const qty = Number(body.quantity);
-    if (!Number.isInteger(qty) || qty <= 0) return NextResponse.json({ error: 'Kuantiti tidak sah' }, { status: 400 });
-    const result = await sql.transaction([
-      sql`UPDATE products SET stock = stock + ${qty}, updated_at = NOW() WHERE id = ${body.productId}`,
-      sql`INSERT INTO stock_movements (product_id, quantity, movement_type, note) VALUES (${body.productId}, ${qty}, 'STOCK_IN', ${body.note ?? 'Restock'})`,
-    ]);
-    return NextResponse.json({ ok: true, result });
-  }
-
-  if (action === 'checkout') {
-    const items = Array.isArray(body.items) ? body.items : [];
-    if (!items.length) return NextResponse.json({ error: 'Cart kosong' }, { status: 400 });
-    const payment = body.payment;
-    if (!['Tunai', 'QR / Online Transfer', 'Kad'].includes(payment)) return NextResponse.json({ error: 'Kaedah pembayaran tidak sah' }, { status: 400 });
-
-    const result = await sql.transaction([
-      sql`SELECT id FROM products WHERE id = ANY(${items.map((i: { productId: number }) => i.productId)}::bigint[]) FOR UPDATE`,
-      ...items.map((item: { productId: number; quantity: number }) => sql`UPDATE products SET stock = stock - ${item.quantity}, updated_at = NOW() WHERE id = ${item.productId} AND stock >= ${item.quantity}`),
-    ]);
-
-    const products = await sql`SELECT id, price::float8 AS price, stock FROM products WHERE id = ANY(${items.map((i: { productId: number }) => i.productId)}::bigint[])`;
-    const productMap = new Map(products.map((p: { id: number; price: number; stock: number }) => [Number(p.id), p]));
-    if (items.some((i: { productId: number; quantity: number }) => !productMap.get(Number(i.productId)) || Number(i.quantity) <= 0)) return NextResponse.json({ error: 'Item jualan tidak sah' }, { status: 400 });
-    const total = items.reduce((sum: number, i: { productId: number; quantity: number }) => sum + Number(productMap.get(Number(i.productId))!.price) * Number(i.quantity), 0);
-    const [counter] = await sql`INSERT INTO receipt_counters (sale_date, next_no) VALUES (CURRENT_DATE, 2) ON CONFLICT (sale_date) DO UPDATE SET next_no = receipt_counters.next_no + 1 RETURNING next_no - 1 AS receipt_no`;
-    const receiptNo = `SQ-${new Date().toISOString().slice(0,10).replaceAll('-', '')}-${String(counter.receipt_no).padStart(4, '0')}`;
-    const [transaction] = await sql.transaction([
-      sql`INSERT INTO transactions (receipt_no, sold_at, total, payment, note) VALUES (${receiptNo}, COALESCE(${body.date}, NOW()), ${total}, ${payment}, ${body.note ?? ''}) RETURNING id, receipt_no AS "receiptNo", sold_at AS date, total::float8 AS total, payment, note`,
-    ]);
-    await sql.transaction([
-      ...items.map((i: { productId: number; quantity: number }) => {
-        const p = productMap.get(Number(i.productId))!;
-        return sql`INSERT INTO transaction_items (transaction_id, product_id, quantity, unit_price, subtotal) VALUES (${transaction.id}, ${i.productId}, ${i.quantity}, ${p.price}, ${Number(i.quantity) * Number(p.price)})`;
-      }),
-      ...items.map((i: { productId: number; quantity: number }) => sql`INSERT INTO stock_movements (product_id, quantity, movement_type, transaction_id, note) VALUES (${i.productId}, ${-Number(i.quantity)}, 'SALE', ${transaction.id}, ${body.note ?? 'Sale'})`),
-    ]);
-    return NextResponse.json({ ...transaction, items }, { status: 201 });
-  }
-
-  return NextResponse.json({ error: 'Action tidak disokong' }, { status: 400 });
 }
