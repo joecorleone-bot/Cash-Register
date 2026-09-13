@@ -26,9 +26,9 @@ export const dateLabel = (value: string) =>
     minute: '2-digit',
   });
 
-export async function posApi(body?: unknown) {
+async function apiRequest(path: string, body?: unknown) {
   const response = await fetch(
-    '/api/data',
+    path,
     body
       ? {
           method: 'POST',
@@ -41,6 +41,14 @@ export async function posApi(body?: unknown) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Operasi gagal.');
   return data;
+}
+
+export async function posApi(body?: unknown) {
+  return apiRequest('/api/data', body);
+}
+
+export async function posToolsApi(body: unknown) {
+  return apiRequest('/api/transaction-tools', body);
 }
 
 export function exportTransactionsCsv(transactions: Transaction[], productMap: ReadonlyMap<number, { name: string; sku: string }>) {
