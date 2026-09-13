@@ -43,7 +43,7 @@ export async function posApi(body?: unknown) {
   return data;
 }
 
-export function exportTransactionsCsv(transactions: Transaction[], productMap: Map<number, { name: string; sku: string }>) {
+export function exportTransactionsCsv(transactions: Transaction[], productMap: ReadonlyMap<number, { name: string; sku: string }>) {
   const rows = [
     ['Receipt No', 'Tarikh', 'Produk', 'SKU', 'Qty', 'Unit Price', 'Jumlah', 'Payment', 'Nota'],
     ...transactions.flatMap((tx) =>
