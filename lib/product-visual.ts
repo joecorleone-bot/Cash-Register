@@ -1,6 +1,7 @@
 const toyEmoji = ['🧸', '💖', '🐱', '☁️', '🦖', '🐰', '🍓', '🌈'];
 
 export function productEmoji(productId: number) {
-  const index = Math.abs(Number(productId) || 0) % toyEmoji.length;
+  const id = Math.max(1, Math.abs(Math.trunc(Number(productId) || 1)));
+  const index = (id - 1) % toyEmoji.length;
   return toyEmoji[index];
 }
