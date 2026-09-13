@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./products.css";
+import "./toy-v2.css";
 
 export const metadata: Metadata = {
   title: "Cash Register | Sales Dashboard",
-  description: "Interactive daily sales dashboard and cash register",
+  description: "Interactive toy store sales dashboard and cash register",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
