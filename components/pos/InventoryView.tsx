@@ -1,15 +1,18 @@
-import { Archive, Package, Plus } from 'lucide-react';
+import { Archive, Pencil, Package, Plus } from 'lucide-react';
 import { money } from '@/lib/pos-client';
+import { productEmoji } from '@/lib/product-visual';
 import type { Product } from '@/lib/pos-types';
 
 export default function InventoryView({
   products,
   onAddProduct,
+  onEditProduct,
   onStockIn,
   onDeleteProduct,
 }: {
   products: Product[];
   onAddProduct: () => void;
+  onEditProduct: (product: Product) => void;
   onStockIn: (product: Product) => void;
   onDeleteProduct: (product: Product) => void;
 }) {
@@ -18,7 +21,7 @@ export default function InventoryView({
   return (
     <>
       <section className="posPageActions">
-        <div><h2>Products & Stock</h2><p>Add, restock or archive products from the active inventory.</p></div>
+        <div><h2>Products & Stock</h2><p>Add, edit, restock or archive products from the active inventory.</p></div>
         <button className="posPrimaryButton" onClick={onAddProduct}><Plus size={16} />Add Product</button>
       </section>
 
@@ -27,7 +30,7 @@ export default function InventoryView({
       <section className="posInventoryGrid">
         {products.map((product) => (
           <article className="posCard posProductCard" key={product.id}>
-            <div className="posProductEmoji">🧸</div>
+            <div className="posProductEmoji">{productEmoji(product.id)}</div>
             <div className="posProductHead">
               <div><h3>{product.name}</h3><small>{product.sku}</small></div>
               <span className={product.stock <= product.lowStock ? 'posBadge low' : 'posBadge good'}>{product.stock <= product.lowStock ? 'LOW' : 'OK'}</span>
@@ -35,6 +38,7 @@ export default function InventoryView({
             <div className="posPriceLine">{money(product.price)}</div>
             <div className="posProductMeta"><span>Stock <b>{product.stock}</b></span><span>Cost <b>{money(product.cost)}</b></span></div>
             <div className="posInventoryActions">
+              <button className="posSecondaryButton" onClick={() => onEditProduct(product)}><Pencil size={15} />Edit</button>
               <button className="posStockButton" onClick={() => onStockIn(product)}><Plus size={15} />Stock In</button>
               <button className="posDeleteProductButton" onClick={() => onDeleteProduct(product)} title={`Archive ${product.name}`}><Archive size={15} />Archive</button>
             </div>
