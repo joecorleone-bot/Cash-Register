@@ -7,11 +7,12 @@ import InventoryView from './InventoryView';
 import PosView from './PosView';
 import ReportsView from './ReportsView';
 import ReceiptModal from './ReceiptModal';
-import { AddProductModal, StockInModal } from './InventoryModals';
+import { AddProductModal, EditProductModal, StockInModal } from './InventoryModals';
 import { exportTransactionsCsv, posApi, posToolsApi } from '@/lib/pos-client';
 import type { CartItem, Payment, Product, Transaction, View } from '@/lib/pos-types';
 
 type DiscountType = 'percent' | 'fixed';
+type ProductFormValue = { name: string; sku: string; price: number; cost: number; stock: number; lowStock: number };
 
 export default function PosApp() {
   const [view, setView] = useState<View>('dashboard');
@@ -31,10 +32,12 @@ export default function PosApp() {
   const [dateFilter, setDateFilter] = useState('');
   const [productQuery, setProductQuery] = useState('');
   const [addProductOpen, setAddProductOpen] = useState(false);
+  const [editProductOpen, setEditProductOpen] = useState<Product | null>(null);
+  const [editProductValue, setEditProductValue] = useState<ProductFormValue>({ name: '', sku: '', price: 0, cost: 0, stock: 0, lowStock: 5 });
   const [stockOpen, setStockOpen] = useState<Product | null>(null);
   const [stockQty, setStockQty] = useState(1);
   const [stockNote, setStockNote] = useState('Restock');
-  const [newProduct, setNewProduct] = useState({ name: '', sku: '', price: 0, cost: 0, stock: 0, lowStock: 5 });
+  const [newProduct, setNewProduct] = useState<ProductFormValue>({ name: '', sku: '', price: 0, cost: 0, stock: 0, lowStock: 5 });
 
   const loadData = useCallback(async () => {
     try {
@@ -79,6 +82,22 @@ export default function PosApp() {
     setView('pos'); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function openProductEditor(product: Product) {
+    setEditProductOpen(product);
+    setEditProductValue({ name: product.name, sku: product.sku, price: product.price, cost: product.cost, stock: product.stock, lowStock: product.lowStock });
+  }
+
+  async function saveProductEdit() {
+    if (!editProductOpen || !editProductValue.name.trim() || !editProductValue.sku.trim() || editProductValue.price <= 0) return;
+    try {
+      setSaving(true); setError('');
+      await posToolsApi({ action: 'edit-product', productId: editProductOpen.id, ...editProductValue });
+      await loadData();
+      setEditProductOpen(null);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Gagal edit produk.'); }
+    finally { setSaving(false); }
+  }
+
   async function deleteTransaction(tx: Transaction) { if (!confirm(`Padam transaksi ${tx.id}? Stok akan dipulangkan.`)) return; try { setSaving(true); setError(''); await posApi({ action: 'delete-transaction', receiptNo: tx.id }); await loadData(); } catch (e) { setError(e instanceof Error ? e.message : 'Gagal padam transaksi.'); } finally { setSaving(false); } }
   async function addProduct() { if (!newProduct.name.trim() || !newProduct.sku.trim() || newProduct.price <= 0) return; try { setSaving(true); setError(''); await posApi({ action: 'product', ...newProduct }); await loadData(); setNewProduct({ name: '', sku: '', price: 0, cost: 0, stock: 0, lowStock: 5 }); setAddProductOpen(false); } catch (e) { setError(e instanceof Error ? e.message : 'Gagal tambah produk.'); } finally { setSaving(false); } }
   async function stockIn() { if (!stockOpen || stockQty <= 0) return; try { setSaving(true); setError(''); await posApi({ action: 'stock-in', productId: stockOpen.id, quantity: stockQty, note: stockNote }); await loadData(); setStockOpen(null); setStockQty(1); setStockNote('Restock'); } catch (e) { setError(e instanceof Error ? e.message : 'Stock In gagal.'); } finally { setSaving(false); } }
@@ -93,10 +112,11 @@ export default function PosApp() {
       {error && <div className="posAlert"><span>{error}</span><button onClick={() => setError('')}>×</button></div>}
       {view === 'dashboard' && <DashboardView products={activeProducts} transactions={transactions} onNewSale={() => setView('pos')} />}
       {view === 'pos' && <PosView products={activeProducts} cart={cart} payment={payment} note={note} editing={editing} saving={saving} productQuery={productQuery} discountType={discountType} discountValue={discountValue} onProductQuery={setProductQuery} onAdd={addToCart} onQty={changeQty} onRemove={(id) => setCart((c) => c.filter((i) => i.productId !== id))} onPayment={setPayment} onNote={setNote} onDiscountType={setDiscountType} onDiscountValue={setDiscountValue} onCheckout={checkout} onCancelEdit={resetSale} />}
-      {view === 'inventory' && <InventoryView products={activeProducts} onAddProduct={() => setAddProductOpen(true)} onStockIn={(product) => { setStockOpen(product); setStockQty(1); setStockNote('Restock'); }} onDeleteProduct={archiveProduct} />}
+      {view === 'inventory' && <InventoryView products={activeProducts} onAddProduct={() => setAddProductOpen(true)} onEditProduct={openProductEditor} onStockIn={(product) => { setStockOpen(product); setStockQty(1); setStockNote('Restock'); }} onDeleteProduct={archiveProduct} />}
       {view === 'reports' && <ReportsView products={products} transactions={transactions} query={query} dateFilter={dateFilter} onQuery={setQuery} onDateFilter={setDateFilter} onExport={(rows) => exportTransactionsCsv(rows, productMap)} onView={setReceipt} onEdit={editTransaction} onDelete={deleteTransaction} />}
     </section>
     {addProductOpen && <AddProductModal value={newProduct} saving={saving} onChange={setNewProduct} onClose={() => setAddProductOpen(false)} onSave={addProduct} />}
+    {editProductOpen && <EditProductModal product={editProductOpen} value={editProductValue} saving={saving} onChange={setEditProductValue} onClose={() => setEditProductOpen(null)} onSave={saveProductEdit} />}
     {stockOpen && <StockInModal product={stockOpen} quantity={stockQty} note={stockNote} saving={saving} onQuantity={setStockQty} onNote={setStockNote} onClose={() => setStockOpen(null)} onSave={stockIn} />}
     {receipt && <ReceiptModal receipt={receipt} products={products} onClose={() => setReceipt(null)} />}
   </main>;
