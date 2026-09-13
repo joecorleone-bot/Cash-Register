@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./products.css";
 import "./toy-v2.css";
+import "./features.css";
 
 export const metadata: Metadata = {
   title: "Cash Register | Sales Dashboard",
