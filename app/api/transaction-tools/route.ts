@@ -15,7 +15,8 @@ function nonNegativeNumber(value: unknown) {
 }
 
 function errorMessage(error: unknown) {
-  const e = error as { message?: string };
+  const e = error as { code?: string; message?: string };
+  if (e?.code === '23505') return 'SKU sudah digunakan oleh produk lain.';
   return e?.message || 'Ralat pangkalan data.';
 }
 
@@ -23,6 +24,59 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const action = String(body?.action ?? '');
+
+    if (action === 'edit-product') {
+      const productId = positiveInt(body.productId);
+      const name = String(body.name ?? '').trim();
+      const sku = String(body.sku ?? '').trim().toUpperCase();
+      const price = nonNegativeNumber(body.price);
+      const cost = nonNegativeNumber(body.cost);
+      const stock = nonNegativeNumber(body.stock);
+      const lowStock = nonNegativeNumber(body.lowStock);
+
+      if (!productId || !name || !sku || sku.startsWith('ARCHIVED-') || price === null || price <= 0 || cost === null || stock === null || lowStock === null) {
+        return NextResponse.json({ error: 'Maklumat produk tidak sah.' }, { status: 400 });
+      }
+
+      const nextStock = Math.trunc(stock);
+      const nextLowStock = Math.trunc(lowStock);
+      const [product] = await sql`
+        WITH target AS MATERIALIZED (
+          SELECT id, stock
+          FROM products
+          WHERE id = ${productId}
+            AND sku NOT LIKE 'ARCHIVED-%'
+          FOR UPDATE
+        ), movement AS (
+          INSERT INTO stock_movements (product_id, quantity, movement_type, note)
+          SELECT id, ${nextStock} - stock, 'ADJUSTMENT', 'Inventory product edited: stock adjusted'
+          FROM target
+          WHERE ${nextStock} <> stock
+          RETURNING id
+        ), updated AS (
+          UPDATE products p
+          SET name = ${name},
+              sku = ${sku},
+              price = ${price},
+              cost = ${cost},
+              stock = ${nextStock},
+              low_stock = ${nextLowStock},
+              updated_at = NOW()
+          FROM target t
+          WHERE p.id = t.id
+          RETURNING p.id, p.name, p.sku, p.price, p.cost, p.stock, p.low_stock
+        )
+        SELECT id, name, sku,
+               price::float8 AS price,
+               cost::float8 AS cost,
+               stock,
+               low_stock AS "lowStock"
+        FROM updated
+      `;
+
+      if (!product) return NextResponse.json({ error: 'Produk tidak dijumpai atau sudah diarkib.' }, { status: 404 });
+      return NextResponse.json(product);
+    }
 
     if (action === 'archive-product') {
       const productId = positiveInt(body.productId);
