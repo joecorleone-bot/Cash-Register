@@ -1,4 +1,4 @@
-import { Package, Plus, Trash2 } from 'lucide-react';
+import { Archive, Package, Plus } from 'lucide-react';
 import { money } from '@/lib/pos-client';
 import type { Product } from '@/lib/pos-types';
 
@@ -18,7 +18,7 @@ export default function InventoryView({
   return (
     <>
       <section className="posPageActions">
-        <div><h2>Products & Stock</h2><p>Add, restock or remove products from inventory.</p></div>
+        <div><h2>Products & Stock</h2><p>Add, restock or archive products from the active inventory.</p></div>
         <button className="posPrimaryButton" onClick={onAddProduct}><Plus size={16} />Add Product</button>
       </section>
 
@@ -36,7 +36,7 @@ export default function InventoryView({
             <div className="posProductMeta"><span>Stock <b>{product.stock}</b></span><span>Cost <b>{money(product.cost)}</b></span></div>
             <div className="posInventoryActions">
               <button className="posStockButton" onClick={() => onStockIn(product)}><Plus size={15} />Stock In</button>
-              <button className="posDeleteProductButton" onClick={() => onDeleteProduct(product)} title={`Remove ${product.name}`}><Trash2 size={15} />Remove</button>
+              <button className="posDeleteProductButton" onClick={() => onDeleteProduct(product)} title={`Archive ${product.name}`}><Archive size={15} />Archive</button>
             </div>
           </article>
         ))}
