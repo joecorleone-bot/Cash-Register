@@ -1,30 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { SESSION_COOKIE, sessionToken } from '@/lib/auth';
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const sitePassword = process.env.SITE_PASSWORD;
-
-  // Keep the site usable until SITE_PASSWORD is configured in Vercel.
   if (!sitePassword) return NextResponse.next();
 
-  const authorization = request.headers.get('authorization');
-  if (authorization?.startsWith('Basic ')) {
-    try {
-      const decoded = atob(authorization.slice(6));
-      const separator = decoded.indexOf(':');
-      const password = separator >= 0 ? decoded.slice(separator + 1) : '';
-      if (password === sitePassword) return NextResponse.next();
-    } catch {
-      // Invalid Authorization header; show the login prompt below.
+  const { pathname } = request.nextUrl;
+  const isAuthRoute = pathname === '/login' || pathname.startsWith('/api/auth/');
+  const expectedToken = await sessionToken(sitePassword);
+  const session = request.cookies.get(SESSION_COOKIE)?.value;
+  const isAuthenticated = session === expectedToken;
+
+  if (isAuthRoute) {
+    if (pathname === '/login' && isAuthenticated) {
+      return NextResponse.redirect(new URL('/', request.url));
     }
+    return NextResponse.next();
   }
 
-  return new NextResponse('Access restricted', {
-    status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="Squishy Toy POS", charset="UTF-8"',
-      'Cache-Control': 'no-store',
-    },
-  });
+  if (!isAuthenticated) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {
