@@ -4,6 +4,7 @@ import "./products.css";
 import "./toy-v2.css";
 import "./features.css";
 import "./v3.css";
+import "./auth.css";
 
 export const metadata: Metadata = {
   title: "Cash Register | Sales Dashboard",
