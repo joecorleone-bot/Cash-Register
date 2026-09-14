@@ -35,7 +35,7 @@ export default function LoginPage() {
     <main className="authShell">
       <section className="authCard">
         <div className="authLogo"><Sparkles size={26} /></div>
-        <span className="authEyebrow">SQUISHY TOY POS</span>
+        <span className="authEyebrow">We'Ouls Toy Shop</span>
         <h1>Welcome back</h1>
         <p>Sign in with your staff account to open the sales workspace.</p>
 
