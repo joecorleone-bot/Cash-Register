@@ -30,7 +30,7 @@ export default function DashboardView({ products, transactions, onNewSale }: { p
     <>
       <section className="posHero posToyHero">
         <div className="posToyCopy">
-          <span className="posToyBadge"><Sparkles size={13} /> SQUISHY TOY STORE</span>
+          <span className="posToyBadge"><Sparkles size={13} /> LITTLE SQUISHY</span>
           <h2>Welcome to We'Ouls little toy shop! ✨</h2>
           <p>Pantau jualan, stok dan produk paling popular dalam satu dashboard yang ceria.</p>
           <button className="posPrimaryButton posToySaleButton" onClick={onNewSale}><ShoppingBag size={17} /> Start New Sale</button>
