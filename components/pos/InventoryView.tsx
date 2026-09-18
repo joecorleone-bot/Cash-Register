@@ -1,56 +1,18 @@
 "use client";
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Archive, Grid2X2, List, Pencil, Package, Plus } from 'lucide-react';
 import { money } from '@/lib/pos-client';
 import { productEmoji } from '@/lib/product-visual';
 import type { Product } from '@/lib/pos-types';
 
-export default function InventoryView({
-  products,
-  onAddProduct,
-  onEditProduct,
-  onStockIn,
-  onDeleteProduct,
-}: {
-  products: Product[];
-  onAddProduct: () => void;
-  onEditProduct: (product: Product) => void;
-  onStockIn: (product: Product) => void;
-  onDeleteProduct: (product: Product) => void;
-}) {
-  const [mode, setMode] = useState<'grid' | 'list'>('grid');
+export default function InventoryView({ products, onAddProduct, onEditProduct, onStockIn, onDeleteProduct }: { products: Product[]; onAddProduct: () => void; onEditProduct: (product: Product) => void; onStockIn: (product: Product) => void; onDeleteProduct: (product: Product) => void; }) {
+  const [mode, setMode] = useState<'grid' | 'list'>('grid'); const [category, setCategory] = useState('All');
+  const categories = useMemo(() => ['All', ...Array.from(new Set(products.map((p) => p.category || 'Squishy'))).sort()], [products]);
+  const visibleProducts = category === 'All' ? products : products.filter((p) => (p.category || 'Squishy') === category);
   const lowStock = products.filter((p) => p.stock <= p.lowStock);
-
-  return (
-    <>
-      <section className="posPageActions">
-        <div><h2>Products & Stock</h2><p>Add, edit, restock or archive products from the active inventory.</p></div>
-        <div className="posInventoryTopActions"><div className="posViewToggle"><button className={mode === 'grid' ? 'active' : ''} onClick={() => setMode('grid')}><Grid2X2 size={15} />Grid</button><button className={mode === 'list' ? 'active' : ''} onClick={() => setMode('list')}><List size={15} />List</button></div><button className="posPrimaryButton" onClick={onAddProduct}><Plus size={16} />Add Product</button></div>
-      </section>
-
-      {lowStock.length > 0 && <div className="posStockWarning"><Package size={18} /><span><b>Low stock:</b> {lowStock.map((p) => p.name).join(', ')}</span></div>}
-
-      {mode === 'grid' ? <section className="posInventoryGrid">
-        {products.map((product) => (
-          <article className="posCard posProductCard" key={product.id}>
-            <div className="posProductEmoji">{productEmoji(product.id)}</div>
-            <div className="posProductHead">
-              <div><h3>{product.name}</h3><small>{product.sku}</small></div>
-              <span className={product.stock <= product.lowStock ? 'posBadge low' : 'posBadge good'}>{product.stock <= product.lowStock ? 'LOW' : 'OK'}</span>
-            </div>
-            <div className="posPriceLine">{money(product.price)}</div>
-            <div className="posProductMeta"><span>Stock <b>{product.stock}</b></span><span>Cost <b>{money(product.cost)}</b></span></div>
-            <div className="posStockMeter"><span style={{ width: `${Math.min(100, Math.max(8, (product.stock / Math.max(product.lowStock * 3, 1)) * 100))}%` }} /></div>
-            <div className="posInventoryActions">
-              <button className="posSecondaryButton" onClick={() => onEditProduct(product)}><Pencil size={15} />Edit</button>
-              <button className="posStockButton" onClick={() => onStockIn(product)}><Plus size={15} />Stock In</button>
-              <button className="posDeleteProductButton" onClick={() => onDeleteProduct(product)} title={`Archive ${product.name}`}><Archive size={15} />Archive</button>
-            </div>
-          </article>
-        ))}
-        {!products.length && <div className="posEmpty">Belum ada produk.</div>}
-      </section> : <section className="posCard posInventoryListCard"><div className="posTableWrap"><table className="posInventoryTable"><thead><tr><th>Product</th><th>SKU</th><th>Price</th><th>Cost</th><th>Stock</th><th>Status</th><th>Action</th></tr></thead><tbody>{products.map((product) => <tr key={product.id}><td><div className="posListProduct"><span>{productEmoji(product.id)}</span><b>{product.name}</b></div></td><td>{product.sku}</td><td>{money(product.price)}</td><td>{money(product.cost)}</td><td><b>{product.stock}</b></td><td><span className={product.stock <= product.lowStock ? 'posBadge low' : 'posBadge good'}>{product.stock <= product.lowStock ? 'LOW STOCK' : 'HEALTHY'}</span></td><td className="posActions"><button className="posTextButton" onClick={() => onEditProduct(product)}>Edit</button><button className="posTextButton" onClick={() => onStockIn(product)}>Stock In</button><button className="posIconButton danger" onClick={() => onDeleteProduct(product)}><Archive size={14} /></button></td></tr>)}</tbody></table>{!products.length && <div className="posEmpty">Belum ada produk.</div>}</div></section>}
-    </>
-  );
+  return <><section className="posPageActions"><div><h2>Products & Stock</h2><p>Manage products across Squishy, Tumbler and other categories.</p></div><div className="posInventoryTopActions"><div className="posViewToggle"><button className={mode === 'grid' ? 'active' : ''} onClick={() => setMode('grid')}><Grid2X2 size={15} />Grid</button><button className={mode === 'list' ? 'active' : ''} onClick={() => setMode('list')}><List size={15} />List</button></div><button className="posPrimaryButton" onClick={onAddProduct}><Plus size={16} />Add Product</button></div></section>
+  <div className="posV4Categories posV4InventoryCategories">{categories.map((item) => <button key={item} className={category === item ? 'active' : ''} onClick={() => setCategory(item)}>{item}</button>)}</div>
+  {lowStock.length > 0 && <div className="posStockWarning"><Package size={18} /><span><b>Low stock:</b> {lowStock.map((p) => p.name).join(', ')}</span></div>}
+  {mode === 'grid' ? <section className="posInventoryGrid">{visibleProducts.map((product) => <article className="posCard posProductCard" key={product.id}><div className="posProductEmoji">{productEmoji(product.id)}</div><div className="posProductHead"><div><h3>{product.name}</h3><small>{product.sku}</small><div><span className="posV4CategoryBadge">{product.category || 'Squishy'}</span></div></div><span className={product.stock <= product.lowStock ? 'posBadge low' : 'posBadge good'}>{product.stock <= product.lowStock ? 'LOW' : 'OK'}</span></div><div className="posPriceLine">{money(product.price)}</div><div className="posProductMeta"><span>Stock <b>{product.stock}</b></span><span>Cost <b>{money(product.cost)}</b></span></div><div className="posStockMeter"><span style={{ width: `${Math.min(100, Math.max(8, (product.stock / Math.max(product.lowStock * 3, 1)) * 100))}%` }} /></div><div className="posInventoryActions"><button className="posSecondaryButton" onClick={() => onEditProduct(product)}><Pencil size={15} />Edit</button><button className="posStockButton" onClick={() => onStockIn(product)}><Plus size={15} />Stock In</button><button className="posDeleteProductButton" onClick={() => onDeleteProduct(product)}><Archive size={15} />Archive</button></div></article>)}{!visibleProducts.length && <div className="posEmpty">Tiada produk dalam category ini.</div>}</section> : <section className="posCard posInventoryListCard"><div className="posTableWrap"><table className="posInventoryTable"><thead><tr><th>Product</th><th>Category</th><th>SKU</th><th>Price</th><th>Cost</th><th>Stock</th><th>Status</th><th>Action</th></tr></thead><tbody>{visibleProducts.map((product) => <tr key={product.id}><td><div className="posListProduct"><span>{productEmoji(product.id)}</span><b>{product.name}</b></div></td><td><span className="posV4CategoryBadge">{product.category || 'Squishy'}</span></td><td>{product.sku}</td><td>{money(product.price)}</td><td>{money(product.cost)}</td><td><b>{product.stock}</b></td><td><span className={product.stock <= product.lowStock ? 'posBadge low' : 'posBadge good'}>{product.stock <= product.lowStock ? 'LOW STOCK' : 'HEALTHY'}</span></td><td className="posActions"><button className="posTextButton" onClick={() => onEditProduct(product)}>Edit</button><button className="posTextButton" onClick={() => onStockIn(product)}>Stock In</button><button className="posIconButton danger" onClick={() => onDeleteProduct(product)}><Archive size={14} /></button></td></tr>)}</tbody></table>{!visibleProducts.length && <div className="posEmpty">Tiada produk dalam category ini.</div>}</div></section>}</>;
 }
